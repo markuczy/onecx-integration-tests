@@ -11,10 +11,10 @@
     "paths": {
       "tenant/*": ["tenant/*"],
       "theme/*": ["theme/*"],
-      "assignments/*": ["assignments/*"],
+      "permission-assignment/*": ["permission-assignment/*"],
       "workspace/*": ["workspace/*"],
-      "product-store/*": ["product-store-bak/*"],
-      "permissions/*": ["permissions-bak/*"]
+      "product-store/*": ["product-store/*"],
+      "permissions/*": ["permissions/*"]
     }
   }
 }
