@@ -7,11 +7,26 @@ import { StartedOnecxKeycloakContainer } from '../containers/core/onecx-keycloak
 import * as fs from 'fs'
 import * as path from 'path'
 import { StartedShellUiContainer } from '../containers/ui/onecx-shell-ui'
-import { ContainerInfo } from '../../imports-scripts/import-manager'
 import { PlatformConfig } from '../models/interfaces/platform-config.interface'
 import { loggingEnabled } from '../utils/logging-enable'
 import { Logger, LogMessages } from '../utils/logger'
 import { isE2eContainer, isKeycloakContainer, isShellUiContainer } from '../utils/container-utils'
+import { packagePath } from '../utils/package-root'
+
+/**
+ * Container information interface containing authentication and service details
+ */
+export interface ContainerInfo {
+  tokenValues: {
+    username: string
+    password: string
+    realm: string
+    alias: string
+    port: number
+    clientId: string
+  }
+  services: Record<string, { alias: string; port: number }>
+}
 
 const logger = new Logger('DataImporter')
 
@@ -216,7 +231,7 @@ export class DataImporter {
   }
 
   private writeContainerInfoFile(containerInfo: ContainerInfo): string {
-    const containerInfoPath = path.resolve('src/imports/container-info.json')
+    const containerInfoPath = packagePath('src', 'imports', 'container-info.json')
 
     // Ensure the directory exists
     const dir = path.dirname(containerInfoPath)
