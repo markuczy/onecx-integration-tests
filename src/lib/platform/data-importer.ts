@@ -7,11 +7,27 @@ import { StartedOnecxKeycloakContainer } from '../containers/core/onecx-keycloak
 import * as fs from 'fs'
 import * as path from 'path'
 import { StartedShellUiContainer } from '../containers/ui/onecx-shell-ui'
-import { ContainerInfo } from '../../imports-scripts/import-manager'
 import { PlatformConfig } from '../models/interfaces/platform-config.interface'
 import { loggingEnabled } from '../utils/logging-enable'
 import { Logger, LogMessages } from '../utils/logger'
 import { isE2eContainer, isKeycloakContainer, isShellUiContainer } from '../utils/container-utils'
+
+type LogFilePathProvider = (containerName: string) => string | undefined
+
+/**
+ * Container information interface containing authentication and service details
+ */
+export interface ContainerInfo {
+  tokenValues: {
+    username: string
+    password: string
+    realm: string
+    alias: string
+    port: number
+    clientId: string
+  }
+  services: Record<string, { alias: string; port: number }>
+}
 
 const logger = new Logger('DataImporter')
 
@@ -28,7 +44,10 @@ interface ShellUiInfo {
 }
 
 export class DataImporter {
-  constructor(private imageResolver: ImageResolver) {}
+  constructor(
+    private imageResolver: ImageResolver,
+    private readonly logFilePathProvider?: LogFilePathProvider
+  ) {}
 
   /**
    * Import default data using the ImportManagerContainer
@@ -40,50 +59,63 @@ export class DataImporter {
   ): Promise<void> {
     // Platform config is already set globally by PlatformManager
 
-    logger.info(LogMessages.DATA_IMPORT_START)
+    logger.info(`${LogMessages.DATA_IMPORT_START}: ${startedContainers.size} containers available for import`)
 
     try {
       // Create container info file before starting the import container
       const containerInfoPath = this.createContainerInfo(startedContainers)
+      const importContainerLogPath = this.logFilePathProvider?.(CONTAINER.IMPORT_MANAGER)
 
       const importImage = await this.imageResolver.getImportManagerBaseImage(config)
-      const importer = await new ImportManagerContainer(importImage, containerInfoPath, config)
+      const importContainer = new ImportManagerContainer(importImage, containerInfoPath, config)
         .withNetwork(network)
         .withLoggingEnabled(loggingEnabled(config, [CONTAINER.IMPORT_MANAGER]))
-        .start()
+      if (importContainerLogPath) {
+        importContainer.withLogFilePath(importContainerLogPath)
+      }
 
-      logger.info(LogMessages.CONTAINER_STARTED, 'Import container - monitoring import process')
+      const importer = await importContainer.start()
+      const stopImportLogForwarding = await this.startImportLogForwarding(importer)
+
+      logger.info(`${LogMessages.CONTAINER_STARTED}: Import container ${importImage} - monitoring import process`)
+      if (importContainerLogPath) {
+        logger.info(`${LogMessages.CONTAINER_STARTED}: Import container logs file: ${importContainerLogPath}`)
+      }
 
       // Monitor the import process by executing commands in the container
-      await new Promise<void>((resolve, reject) => {
-        const checkInterval = setInterval(async () => {
-          try {
-            const isStillRunning = await this.checkImportStatus(importer)
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const checkInterval = setInterval(async () => {
+            try {
+              const isStillRunning = await this.checkImportStatus(importer)
 
-            if (!isStillRunning) {
+              if (!isStillRunning) {
+                clearInterval(checkInterval)
+                logger.info(`${LogMessages.DATA_IMPORT_PROCESS_COMPLETE}: Import container finished`)
+                resolve()
+              } else {
+                logger.info(`${LogMessages.DATA_IMPORT_PROCESS_RUNNING}: Import container still running`)
+              }
+            } catch (error) {
               clearInterval(checkInterval)
-              logger.info(LogMessages.DATA_IMPORT_PROCESS_COMPLETE)
+              logger.error(`${LogMessages.DATA_IMPORT_PROCESS_ERROR}: Import container error`, undefined, error)
               resolve()
-            } else {
-              logger.info(LogMessages.DATA_IMPORT_PROCESS_RUNNING)
             }
-          } catch (error) {
+          }, 2000)
+
+          setTimeout(() => {
             clearInterval(checkInterval)
-            logger.error(LogMessages.DATA_IMPORT_PROCESS_ERROR, undefined, error)
-            resolve()
-          }
-        }, 2000)
+            reject(new Error('Import timeout after 1 minutes'))
+          }, 1 * 60 * 1000)
+        })
+      } finally {
+        stopImportLogForwarding()
+      }
 
-        setTimeout(() => {
-          clearInterval(checkInterval)
-          reject(new Error('Import timeout after 1 minutes'))
-        }, 1 * 60 * 1000)
-      })
-
-      logger.success(LogMessages.DATA_IMPORT_SUCCESS)
+      logger.success(`${LogMessages.DATA_IMPORT_SUCCESS}: Import completed successfully`)
       this.cleanupContainerInfo(containerInfoPath)
     } catch (error) {
-      logger.error(LogMessages.DATA_IMPORT_FAILED, undefined, error)
+      logger.error(`${LogMessages.DATA_IMPORT_FAILED}: Import failed`, undefined, error)
       throw error
     }
   }
@@ -166,7 +198,7 @@ export class DataImporter {
     for (const [containerName, container] of startedContainers) {
       // Skip E2E containers - they are test runners, not services
       if (containerName.includes('-e2e') || !('getPort' in container)) {
-        logger.info('SERVICE_SKIPPED', `${containerName} - E2E container (test runner, not a service)`)
+        logger.info(`SERVICE_SKIPPED: ${containerName} - E2E container (test runner, not a service)`)
         continue
       }
 
@@ -180,19 +212,19 @@ export class DataImporter {
         }
 
         logger.info(
-          'SERVICE_MAPPED',
-          `${containerName} -> ${serviceName} (${container.getNetworkAliases()[0]}:${container.getPort()})`
+          `SERVICE_MAPPED: ${containerName} -> ${serviceName} (${
+            container.getNetworkAliases()[0]
+          }:${container.getPort()})`
         )
       } else {
         // Log containers that don't have service mappings for debugging
         logger.info(
-          'SERVICE_SKIPPED',
-          `${containerName} - No service mapping defined (likely UI or infrastructure container)`
+          `SERVICE_SKIPPED: ${containerName} - No service mapping defined (likely UI or infrastructure container)`
         )
       }
     }
 
-    logger.info('SERVICES_DISCOVERED', `Total services mapped: ${Object.keys(services).length}`)
+    logger.info(`SERVICES_DISCOVERED: Total services mapped: ${Object.keys(services).length}`)
     return services
   }
 
@@ -216,7 +248,8 @@ export class DataImporter {
   }
 
   private writeContainerInfoFile(containerInfo: ContainerInfo): string {
-    const containerInfoPath = path.resolve('src/imports/container-info.json')
+    // TODO: Consider using a temporary file or a more secure location for the container info file
+    const containerInfoPath = path.resolve(__dirname, '../../../container-info.json')
 
     // Ensure the directory exists
     const dir = path.dirname(containerInfoPath)
@@ -225,7 +258,7 @@ export class DataImporter {
     }
 
     fs.writeFileSync(containerInfoPath, JSON.stringify(containerInfo, null, 2))
-    logger.info(LogMessages.DATA_IMPORT_FILE_CREATED, containerInfoPath)
+    logger.info(`${LogMessages.DATA_IMPORT_FILE_CREATED}: ${containerInfoPath}`)
 
     return containerInfoPath
   }
@@ -236,7 +269,7 @@ export class DataImporter {
   private cleanupContainerInfo(containerInfoPath: string): void {
     if (fs.existsSync(containerInfoPath)) {
       fs.unlinkSync(containerInfoPath)
-      logger.info(LogMessages.DATA_IMPORT_CLEANUP)
+      logger.info(`${LogMessages.DATA_IMPORT_CLEANUP}: ${containerInfoPath}`)
     }
   }
 
@@ -251,6 +284,49 @@ export class DataImporter {
     } catch {
       // If exec fails, assume import is completed
       return false
+    }
+  }
+
+  private async startImportLogForwarding(importer: StartedImportManagerContainer): Promise<() => void> {
+    const candidate = importer as StartedImportManagerContainer & {
+      logs?: () => Promise<NodeJS.ReadableStream>
+    }
+
+    if (typeof candidate.logs !== 'function') {
+      logger.warn(`${LogMessages.CONTAINER_FAILED}: Import container does not expose logs()`)
+      return () => undefined
+    }
+
+    try {
+      const stream = await candidate.logs()
+
+      const onData = (chunk: Buffer | string): void => {
+        const text = chunk.toString()
+        for (const line of text.split('\n')) {
+          const trimmed = line.trim()
+          if (trimmed.length > 0) {
+            logger.info(`IMPORT_CONTAINER_LOG: ${trimmed}`)
+          }
+        }
+      }
+
+      const onError = (error: unknown): void => {
+        logger.warn(`IMPORT_CONTAINER_LOG_ERROR: ${String(error)}`)
+      }
+
+      stream.on('data', onData)
+      stream.on('error', onError)
+
+      return () => {
+        stream.off('data', onData)
+        stream.off('error', onError)
+        if (typeof (stream as { destroy?: () => void }).destroy === 'function') {
+          ;(stream as { destroy: () => void }).destroy()
+        }
+      }
+    } catch (error) {
+      logger.warn(`IMPORT_CONTAINER_LOG_ERROR: Failed to attach import container logs: ${String(error)}`)
+      return () => undefined
     }
   }
 }

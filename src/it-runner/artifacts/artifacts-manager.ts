@@ -11,12 +11,14 @@ export class ArtifactsManager {
   private artifactsRoot: string
   private runDir: string
   private logsDir: string
+  private containersLogsDir: string
   private runnerLogPath: string
 
   constructor(baseDir: string | undefined, runId: string) {
     this.artifactsRoot = resolveArtifactsRoot(baseDir)
     this.runDir = resolveRunArtifactsDir(this.artifactsRoot, runId)
     this.logsDir = path.join(this.runDir, 'logs')
+    this.containersLogsDir = path.join(this.logsDir, 'containers')
     this.runnerLogPath = path.join(this.logsDir, 'runner-output.log')
   }
 
@@ -28,8 +30,11 @@ export class ArtifactsManager {
   ensureDirectories(): void {
     fs.mkdirSync(this.runDir, { recursive: true })
     fs.mkdirSync(this.logsDir, { recursive: true })
+    fs.mkdirSync(this.containersLogsDir, { recursive: true })
     fs.mkdirSync(path.join(this.runDir, 'reports'), { recursive: true })
     fs.mkdirSync(path.join(this.runDir, E2E_OUTPUT_DIR), { recursive: true })
+    // Ensure runner output log file exists even before the first write.
+    fs.closeSync(fs.openSync(this.runnerLogPath, 'a'))
   }
 
   /**
@@ -58,6 +63,18 @@ export class ArtifactsManager {
    */
   getRunnerLogPath(): string {
     return this.runnerLogPath
+  }
+
+  /**
+   * Get the log file path for a specific container.
+   *
+   * @param containerName Name of the container
+   * @returns Absolute path to the container's log file
+   */
+  getContainerLogPath(containerName: string): string {
+    // Sanitize container name for use as filename
+    const sanitized = containerName.replace(/[^a-zA-Z0-9._-]/g, '_')
+    return path.join(this.containersLogsDir, `${sanitized}.log`)
   }
 
   /**

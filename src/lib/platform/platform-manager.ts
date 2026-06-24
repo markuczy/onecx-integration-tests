@@ -21,11 +21,21 @@ import type { PlatformRuntime } from '../models/interfaces/platform-runtime.inte
 
 const logger = new Logger('PlatformManager')
 
+/**
+ * Type for a function that provides log file paths for containers
+ */
+export type LogFilePathProvider = (containerName: string) => string | undefined
+
 export class PlatformManager implements PlatformRuntime {
   /**
    * Container registry for managing all containers
    */
   private containerRegistry: ContainerRegistry = new ContainerRegistry()
+
+  /**
+   * Optional provider for container log file paths
+   */
+  private logFilePathProvider?: LogFilePathProvider
 
   /**
    * Needed classes for startContainers
@@ -40,9 +50,17 @@ export class PlatformManager implements PlatformRuntime {
   private validatedConfig?: PlatformConfig
   private platformInfoExporter?: PlatformInfoExporter
 
-  constructor(configFilePath?: string) {
+  constructor(configFilePath?: string, logFilePathProvider?: LogFilePathProvider) {
     this.jsonValidator = new PlatformConfigJsonValidator()
+    this.logFilePathProvider = logFilePathProvider
     this.initializeConfiguration(configFilePath)
+  }
+
+  /**
+   * Set the log file path provider
+   */
+  setLogFilePathProvider(provider: LogFilePathProvider): void {
+    this.logFilePathProvider = provider
   }
 
   /**
@@ -53,9 +71,6 @@ export class PlatformManager implements PlatformRuntime {
     // Use validated config from constructor if available, otherwise use provided config or default
     const finalConfig = config || this.validatedConfig || DEFAULT_PLATFORM_CONFIG
 
-    // Configure logger based on platform config
-    logger.setPlatformConfig(finalConfig)
-
     logger.info(LogMessages.PLATFORM_MANAGER_INIT)
     this.healthChecker = new HealthChecker()
 
@@ -63,7 +78,7 @@ export class PlatformManager implements PlatformRuntime {
     this.healthChecker.configureHeartbeat(finalConfig.heartbeat)
 
     this.imageResolver = new ImageResolver()
-    this.dataImporter = new DataImporter(this.imageResolver)
+    this.dataImporter = new DataImporter(this.imageResolver, this.logFilePathProvider)
 
     logger.info(LogMessages.NETWORK_CREATE)
     this.network = await new Network().start()
@@ -73,7 +88,8 @@ export class PlatformManager implements PlatformRuntime {
       this.imageResolver,
       this.network,
       this.containerRegistry,
-      finalConfig
+      finalConfig,
+      this.logFilePathProvider
     )
 
     logger.info(LogMessages.PLATFORM_START)
@@ -97,7 +113,8 @@ export class PlatformManager implements PlatformRuntime {
         this.imageResolver,
         this.containerRegistry,
         postgres,
-        keycloak
+        keycloak,
+        this.logFilePathProvider
       )
       await this.createContainers(finalConfig)
     }
@@ -322,7 +339,8 @@ export class PlatformManager implements PlatformRuntime {
         this.imageResolver,
         this.containerRegistry,
         postgres,
-        keycloak
+        keycloak,
+        this.logFilePathProvider
       )
     }
 
@@ -339,9 +357,9 @@ export class PlatformManager implements PlatformRuntime {
 
     try {
       await this.UserDefinedContainerStarter.createAndStartContainers(config)
-      logger.info(LogMessages.CONTAINER_STARTED, 'User-defined containers created successfully')
+      logger.info(`${LogMessages.CONTAINER_STARTED}: User-defined containers created successfully`)
     } catch (error) {
-      logger.error(LogMessages.CONTAINER_FAILED, undefined, error)
+      logger.error(`${LogMessages.CONTAINER_FAILED}: User-defined containers`, undefined, error)
       throw error
     }
   }

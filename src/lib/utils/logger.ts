@@ -1,7 +1,5 @@
 import * as fs from 'fs'
 import * as path from 'path'
-import { loggingEnabled } from './logging-enable'
-import { PlatformConfig } from '../models/interfaces/platform-config.interface'
 
 /**
  * Centralized logging messages
@@ -79,8 +77,8 @@ export interface LoggerOptions {
  * Structured logger with timestamp, class and context information
  */
 export class Logger {
-  private static loggingEnabled = true
-  private static platformConfig: PlatformConfig | undefined = undefined
+  private static globalWriter?: fs.WriteStream
+  private static globalFilePath?: string
   private className: string
   private writer?: fs.WriteStream
   private enableConsole: boolean
@@ -102,36 +100,47 @@ export class Logger {
   }
 
   /**
-   * Set the platform configuration for logging decisions
+   * Configure a shared log file sink used by all Logger instances.
+   *
+   * The argument must be a full file path (for example `.../logs/runner-output.log`).
+   * The parent directory is created automatically.
+   *
+   * Passing `undefined` disables the shared sink and closes any active global writer.
    */
-  setPlatformConfig(config: PlatformConfig): void {
-    Logger.platformConfig = config
+  static configureGlobalFilePath(filePath: string | undefined): void {
+    if (!filePath) {
+      if (Logger.globalWriter) {
+        Logger.globalWriter.end()
+      }
+      Logger.globalWriter = undefined
+      Logger.globalFilePath = undefined
+      return
+    }
+
+    if (Logger.globalFilePath === filePath && Logger.globalWriter) {
+      return
+    }
+
+    if (Logger.globalWriter) {
+      Logger.globalWriter.end()
+      Logger.globalWriter = undefined
+    }
+
+    fs.mkdirSync(path.dirname(filePath), { recursive: true })
+    Logger.globalWriter = fs.createWriteStream(filePath, { flags: 'a' })
+    Logger.globalFilePath = filePath
   }
 
   /**
-   * Get the current platform configuration
+   * Flush and close the shared global writer when one is active.
    */
-  static getPlatformConfig(): PlatformConfig | undefined {
-    return Logger.platformConfig
-  }
-
-  /**
-   * Check if logging should be enabled for this logger instance
-   * Uses the existing loggingEnabled function with className as networkAlias
-   */
-  private loggingEnabled(): boolean {
-    // If global logging is disabled, nothing logs
-    if (!Logger.loggingEnabled) {
-      return false
-    }
-
-    // If no platform config is set, use global default
-    if (!Logger.platformConfig) {
-      return Logger.loggingEnabled
-    }
-
-    // Use the existing loggingEnabled function, treating className as networkAlias
-    return loggingEnabled(Logger.platformConfig, [this.className])
+  static closeGlobalWriter(): Promise<void> {
+    if (!Logger.globalWriter) return Promise.resolve()
+    return new Promise((resolve) => {
+      Logger.globalWriter?.end(resolve)
+      Logger.globalWriter = undefined
+      Logger.globalFilePath = undefined
+    })
   }
 
   private formatTimestamp(): string {
@@ -141,12 +150,21 @@ export class Logger {
   private formatMessage(level: string, message: string, context?: string): string {
     const timestamp = this.formatTimestamp()
     const contextPart = context ? ` - (${context})` : ''
-    return `${this.className}: ${timestamp} [${level}] ${this.className} ${message}${contextPart}`
+    return `[${level}] [${this.className}] ${message}${contextPart}`
+  }
+
+  private formatTerminalMessage(level: string, message: string, context?: string): string {
+    const levelPadded = level.padEnd(5)
+    const contextPart = context ? ` - (${context})` : ''
+    return `[${levelPadded}] ${message}${contextPart}`
   }
 
   private writeToFile(line: string): void {
     if (this.writer) {
       this.writer.write(`${line}\n`)
+    }
+    if (Logger.globalWriter) {
+      Logger.globalWriter.write(`${line}\n`)
     }
   }
 
@@ -155,28 +173,27 @@ export class Logger {
   }
 
   private emit(level: LoggerLevel, message: string, context?: string, error?: unknown): void {
-    if (!this.loggingEnabled()) return
-
     const formattedMessage = this.formatMessage(level.toUpperCase(), message, context)
+    const terminalMessage = this.formatTerminalMessage(level.toUpperCase(), message, context)
 
     if (this.enableConsole) {
       switch (level) {
         case 'success':
-          console.log(`\x1b[32m${formattedMessage}\x1b[0m`)
+          console.log(`\x1b[32m${terminalMessage}\x1b[0m`)
           break
         case 'warn':
-          console.warn(`\x1b[33m${formattedMessage}\x1b[0m`)
+          console.warn(`\x1b[33m${terminalMessage}\x1b[0m`)
           break
         case 'error':
           if (error) {
-            console.error(`\x1b[31m${formattedMessage}\x1b[0m`, error)
+            console.error(`\x1b[31m${terminalMessage}\x1b[0m`, error)
           } else {
-            console.error(`\x1b[31m${formattedMessage}\x1b[0m`)
+            console.error(`\x1b[31m${terminalMessage}\x1b[0m`)
           }
           break
         case 'info':
         default:
-          console.log(formattedMessage)
+          console.log(terminalMessage)
           break
       }
     }
@@ -227,6 +244,14 @@ export class Logger {
    */
   warn(message: string, context?: string): void {
     this.emit('warn', message, context)
+  }
+
+  /**
+   * Log debug message - only shows on terminal if --verbose flag or config enables it
+   */
+  debug(message: string, context?: string): void {
+    const formattedMessage = this.formatMessage('DEBUG', message, context)
+    this.writeToFile(formattedMessage)
   }
 
   /**

@@ -9,9 +9,23 @@
     "type": "git",
     "url": "https://github.com/onecx/onecx-integration-tests"
   },
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": "./index.js",
+    "./it-runner": "./it-runner/index.js"
+  },
+  "bin": {
+    "onecx-it-runner": "dist/it-runner/index.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "start": "nx serve",
-    "build": "nx build",
+    "build": "npm run build:package",
+    "build:package": "tsc -p tsconfig.build.json && node ./scripts/copy-dist-assets.js",
+    "prepare": "npm run build:package",
     "format": "nx format:write --uncommitted",
     "lint": "nx lint",
     "lint:fix": "nx lint --fix",
@@ -20,14 +34,18 @@
     "it:run": "tsx src/it-runner/index.ts",
     "sonar": "npx sonarqube-scanner"
   },
-  "private": true,
   "dependencies": {
     "@nx/devkit": "^19.8.14",
     "@nx/plugin": "^19.8.14",
     "ajv": "^8.17.1",
-    "commander": "^13.1.0",
-    "tslib": "^2.8.0",
-    "tsx": "^4.21.0"
+    "commander": "^13.1.0"
+  },
+  "peerDependencies": {
+    "@nx/devkit": "^19.8.14",
+    "@nx/plugin": "^19.8.14",
+    "axios": "^1.18.0",
+    "dockerode": "^5.0.0",
+    "testcontainers": "^10.28.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.8.0",
@@ -50,8 +68,12 @@
     "sonarqube-scanner": "^4.3.2",
     "testcontainers": "^10.28.0",
     "ts-jest": "^29.1.0",
-    "tslib": "^2.3.0",
+    "tslib": "^2.8.1",
+    "tsx": "^4.21.0",
     "typescript": "~5.5.4",
     "typescript-eslint": "^8.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

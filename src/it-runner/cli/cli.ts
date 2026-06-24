@@ -23,7 +23,7 @@ function buildProgram(env: NodeJS.ProcessEnv): Command {
       // Throw instead of process.exit() so callers can handle CLI errors consistently.
       .exitOverride()
       .option('-v, --verbose', 'Enable verbose output', toBoolean(env.IT_VERBOSE, false))
-      .option('--capture-logs', 'Capture runner console output to file', toBoolean(env.IT_CAPTURE_LOGS, false))
+      .option('--capture-logs', 'Capture runner console output to file', toBoolean(env.IT_CAPTURE_LOGS, true))
       .option('--dry-run', 'Print execution plan without running', false)
   )
 }

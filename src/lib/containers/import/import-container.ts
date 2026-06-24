@@ -1,4 +1,5 @@
 import { AbstractStartedContainer, GenericContainer, StartedTestContainer } from 'testcontainers'
+import * as fs from 'fs'
 import * as path from 'path'
 import { HealthCheckableContainer } from '../../models/interfaces/health-checkable-container.interface'
 import { HealthCheckExecutor } from '../../models/interfaces/health-check-executor.interface'
@@ -9,6 +10,8 @@ export class ImportManagerContainer extends GenericContainer {
   private containerName = 'importManager'
   private importScript = 'import-runner.ts' // Default import script
   protected loggingEnabled = false
+
+  protected logFilePath?: string
 
   constructor(
     image: string,
@@ -34,10 +37,26 @@ export class ImportManagerContainer extends GenericContainer {
     return this
   }
 
+  withLogFilePath(filePath: string): this {
+    this.logFilePath = filePath
+    return this
+  }
+
+  protected getFormattedLogLine(line: string | Buffer): string {
+    const timestamp = new Date().toISOString()
+    const text = typeof line === 'string' ? line : line.toString()
+    return `[${timestamp}] ${text}`
+  }
+
+  protected writeLogToFile(line: string | Buffer, logFilePath: string): void {
+    const formatted = this.getFormattedLogLine(line)
+    fs.appendFileSync(logFilePath, `${formatted}\n`)
+  }
+
   override async start(): Promise<StartedImportManagerContainer> {
     const { importsPath } = this.platformConfig.config ?? {}
-    const resolvedImportsPath = path.resolve(importsPath ?? 'src/imports')
-    const scriptsPath = path.resolve('src/imports-scripts')
+    const resolvedImportsPath = importsPath ? path.resolve(importsPath) : path.resolve(__dirname, '../../../imports')
+    const scriptsPath = path.resolve(__dirname, '../../../imports-scripts')
 
     this.withCopyFilesToContainer([
       {
@@ -67,11 +86,10 @@ export class ImportManagerContainer extends GenericContainer {
           `npm install --no-audit --no-fund --prefer-offline ts-node typescript @types/node axios && npx ts-node ${this.importScript}`,
         ].join(' && '),
       ])
-    if (this.loggingEnabled) {
+    if (this.logFilePath) {
       this.withLogConsumer((stream) => {
-        stream.on('data', (line) => console.log(`${this.containerName}: `, line))
-        stream.on('err', (line) => console.error(`${this.containerName}: `, line))
-        stream.on('end', () => console.log(`${this.containerName}: Stream closed`))
+        stream.on('data', (line) => this.writeLogToFile(line, this.logFilePath!))
+        stream.on('err', (line) => this.writeLogToFile(line, this.logFilePath!))
       })
     }
 
