@@ -78,7 +78,7 @@ export class PlatformManager implements PlatformRuntime {
     this.healthChecker.configureHeartbeat(finalConfig.heartbeat)
 
     this.imageResolver = new ImageResolver()
-    this.dataImporter = new DataImporter(this.imageResolver)
+    this.dataImporter = new DataImporter(this.imageResolver, this.logFilePathProvider)
 
     logger.info(LogMessages.NETWORK_CREATE)
     this.network = await new Network().start()

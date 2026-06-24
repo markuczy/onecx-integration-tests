@@ -77,6 +77,8 @@ export interface LoggerOptions {
  * Structured logger with timestamp, class and context information
  */
 export class Logger {
+  private static globalWriter?: fs.WriteStream
+  private static globalFilePath?: string
   private className: string
   private writer?: fs.WriteStream
   private enableConsole: boolean
@@ -95,6 +97,50 @@ export class Logger {
       fs.mkdirSync(path.dirname(logFilePath), { recursive: true })
       this.writer = fs.createWriteStream(logFilePath, { flags: 'a' })
     }
+  }
+
+  /**
+   * Configure a shared log file sink used by all Logger instances.
+   *
+   * The argument must be a full file path (for example `.../logs/runner-output.log`).
+   * The parent directory is created automatically.
+   *
+   * Passing `undefined` disables the shared sink and closes any active global writer.
+   */
+  static configureGlobalFilePath(filePath: string | undefined): void {
+    if (!filePath) {
+      if (Logger.globalWriter) {
+        Logger.globalWriter.end()
+      }
+      Logger.globalWriter = undefined
+      Logger.globalFilePath = undefined
+      return
+    }
+
+    if (Logger.globalFilePath === filePath && Logger.globalWriter) {
+      return
+    }
+
+    if (Logger.globalWriter) {
+      Logger.globalWriter.end()
+      Logger.globalWriter = undefined
+    }
+
+    fs.mkdirSync(path.dirname(filePath), { recursive: true })
+    Logger.globalWriter = fs.createWriteStream(filePath, { flags: 'a' })
+    Logger.globalFilePath = filePath
+  }
+
+  /**
+   * Flush and close the shared global writer when one is active.
+   */
+  static closeGlobalWriter(): Promise<void> {
+    if (!Logger.globalWriter) return Promise.resolve()
+    return new Promise((resolve) => {
+      Logger.globalWriter?.end(resolve)
+      Logger.globalWriter = undefined
+      Logger.globalFilePath = undefined
+    })
   }
 
   private formatTimestamp(): string {
@@ -116,6 +162,9 @@ export class Logger {
   private writeToFile(line: string): void {
     if (this.writer) {
       this.writer.write(`${line}\n`)
+    }
+    if (Logger.globalWriter) {
+      Logger.globalWriter.write(`${line}\n`)
     }
   }
 

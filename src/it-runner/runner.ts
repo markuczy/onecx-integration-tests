@@ -36,8 +36,9 @@ export class IntegrationTestsRunner {
     this.options = options
     this.runId = this.generateRunId()
     this.artifacts = new ArtifactsManager(undefined, this.runId)
-    const logPath = options.captureLogsToFile ? this.artifacts.getRunnerLogPath() : undefined
-    this.logger = new Logger('IntegrationTestsRunner', logPath)
+    const runnerLogFilePath = options.captureLogsToFile ? this.artifacts.getRunnerLogPath() : undefined
+    Logger.configureGlobalFilePath(runnerLogFilePath)
+    this.logger = new Logger('IntegrationTestsRunner')
 
     // Create log file path provider for containers
     const logFilePathProvider: LogFilePathProvider = (containerName: string) =>
@@ -177,6 +178,7 @@ export class IntegrationTestsRunner {
     }
 
     await this.logger.close()
+    await Logger.closeGlobalWriter()
   }
 
   private finalize(

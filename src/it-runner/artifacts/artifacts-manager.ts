@@ -33,6 +33,8 @@ export class ArtifactsManager {
     fs.mkdirSync(this.containersLogsDir, { recursive: true })
     fs.mkdirSync(path.join(this.runDir, 'reports'), { recursive: true })
     fs.mkdirSync(path.join(this.runDir, E2E_OUTPUT_DIR), { recursive: true })
+    // Ensure runner output log file exists even before the first write.
+    fs.closeSync(fs.openSync(this.runnerLogPath, 'a'))
   }
 
   /**

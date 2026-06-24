@@ -4,6 +4,11 @@ import { parseCliArgs } from './cli'
  * Validates supported CLI flag parsing and error handling.
  */
 describe('parseCliArgs', () => {
+  it('enables capture logs by default', () => {
+    const options = parseCliArgs([], {})
+    expect(options.captureLogsToFile).toBe(true)
+  })
+
   it('parses boolean flags', () => {
     const options = parseCliArgs(['--capture-logs', '--dry-run'], {})
 
