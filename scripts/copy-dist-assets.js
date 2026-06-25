@@ -42,14 +42,11 @@ function copyJsonFilesRecursively(sourceDir, targetDir) {
   }
 }
 
-const importsDir = path.join(root, 'imports')
-const importsScriptsDir = path.join(root, 'imports-scripts')
+const assetsDir = path.join(root, 'assets')
+const assetsDistDir = path.join(distDir, 'assets')
 const srcDir = path.join(root, 'src')
-const distImportsDir = path.join(distDir, 'imports')
-const distImportsScriptsDir = path.join(distDir, 'imports-scripts')
 
-copyDirectory(importsDir, distImportsDir)
-copyDirectory(importsScriptsDir, distImportsScriptsDir)
+copyDirectory(assetsDir, assetsDistDir)
 copyJsonFilesRecursively(srcDir, distDir)
 
 const rootPackageJsonPath = path.join(root, 'package.json')
